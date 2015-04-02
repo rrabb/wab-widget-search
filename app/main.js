@@ -1,6 +1,6 @@
 define([
-	'./widget-locations',
 	'./SimpleQueryEngineNonCase',
+	'./widget-locations',
 
 	'dgrid/extensions/DijitRegistry',
 	'dgrid/OnDemandGrid',
@@ -15,13 +15,17 @@ define([
 	'dojo/on',
 	'dojo/promise/all',
 	'dojo/request/xhr',
-	'dojo/store/Memory',
+
+	'dstore/Filter',
+	'dstore/Memory',
+
 	'dojo/domReady!'
 ], function(
-	widgetLocations, SimpleQueryEngineNonCase,
+	SimpleQueryEngineNonCase, widgetLocations,
 	DijitRegistry, OnDemandGrid,
 	TextBox, BorderContainer, ContentPane,
-	array, declare, lang, on, all, xhr, Memory
+	array, declare, lang, on, all, xhr,
+	Filter, Memory
 ) {
 	return {
 		startup: function() {
@@ -57,30 +61,51 @@ define([
 
 			// put the top level widget into the document, and then call startup()
 			this.borderContainer.placeAt(document.body);
+		},
+		filterGrid: function(grid, memory, searchTerm) {
+			var setToMemory;
+			// if the search is empty, "turn off" filter
+			if (searchTerm === "") {
+				setToMemory = this.memory;
+			} else {
+				var mainFilter;
+				// go though each column, applying the filter for each:
+				for (var key in grid.columns) {
+					if (grid.columns.hasOwnProperty(key)) {
+						var columnName = grid.columns[key].id;
+						var filter = new Filter().match(columnName, new RegExp(searchTerm + "+", "i"));
+						if (mainFilter) {
+							mainFilter = new Filter().or(mainFilter, filter);
+						} else {
+							mainFilter = filter;
+						}
+					}
+				}
+				setToMemory = memory.filter(mainFilter);
+			}
 
+			// set the memory that we've computed above in the if/else
+			grid.set("collection", setToMemory);
 		},
 		initComponents: function(data) {
 			data = this.addLinks(data);
 			this.memory = new Memory({
 				data: data,
-				queryEngine: SimpleQueryEngineNonCase
 			});
-
 			// formatters for grid
 			var makeLink = function(data) {
 				return "<a target=\"_blank\" href=\"" + data + "\">" + data + "</a>";
-			}
+			};
 			var makeLicense = function(data) {
 				if (data == 'http://www.apache.org/licenses/LICENSE-2.0') {
 					return '<a href="http://www.apache.org/licenses/LICENSE-2.0" target="_blank">Apache 2.0</a>';
 				}
 				return data;
-			}
-
+			};
 			// create the grid
 			var CustomGrid = declare([OnDemandGrid, DijitRegistry]);
 			this.grid = new CustomGrid({
-				store: this.memory,
+				collection: this.memory,
 				columns: {
 					name: 'Name',
 					description: 'Description',
@@ -93,24 +118,19 @@ define([
 						label: "Link",
 						formatter: makeLink
 					}
-
 				},
-				query: lang.hitch(this, 'queryGrid'),
-				queryOptions: {
-					sort: [{
-						attribute: "name"
-					}]
-				}
+				query: lang.hitch(this, 'queryGrid')
 			}, "mainDGrid");
+			this.grid.set('sort', 'name');
 
 			this.filterTextBox = new TextBox({
 				'class': 'filteringTextBox',
 				placeholder: 'Search'
 			}).placeAt(this.cp1);
 			on(this.filterTextBox, "keyUp", lang.hitch(this, function(name, oldValue, newValue) {
-				this.grid.refresh();
+				var searchValue = this.filterTextBox.get("value");
+				this.filterGrid(this.grid, this.memory, searchValue);
 			}));
-
 			this.borderContainer.startup();
 		},
 		getData: function(dataUrls) {
@@ -123,7 +143,7 @@ define([
 					},
 				});
 			});
-			return all(dl)
+			return all(dl);
 		},
 		queryGrid: function(item, index, items) {
 			var filterString = this.filterTextBox ? this.filterTextBox.get("value") + "" : "";
@@ -150,5 +170,5 @@ define([
 			}
 			return data;
 		}
-	}
+	};
 });
