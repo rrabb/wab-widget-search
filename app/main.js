@@ -14,6 +14,7 @@ define([
 	'dojo/on',
 	'dojo/promise/all',
 	'dojo/request/xhr',
+	'dojo/Deferred',
 
 	'dstore/Filter',
 	'dstore/Memory',
@@ -23,13 +24,15 @@ define([
 	widgetLocations,
 	DijitRegistry, OnDemandGrid,
 	TextBox, BorderContainer, ContentPane,
-	array, declare, lang, on, all, xhr,
+	array, declare, lang, on, all, xhr, Deferred,
 	Filter, Memory
 ) {
 	return {
 		startup: function() {
 			this.initPageStructure();
-			this.getData(widgetLocations).then(lang.hitch(this, 'initComponents'));
+			this.getData(widgetLocations).then(lang.hitch(this, 'initComponents'), function(err) {
+				console.log('Error:', err);
+			});
 		},
 		initPageStructure: function() {
 			this.borderContainer = new BorderContainer({
@@ -40,7 +43,7 @@ define([
 			// create a ContentPane as the left pane in the BorderContainer
 			this.cp1 = new ContentPane({
 				region: "top",
-				content: '<div class="title">Web App Builder Widget Search</div>'
+				content: '<div class="title">Web AppBuilder Widget Search</div>'
 			});
 			this.borderContainer.addChild(this.cp1);
 
@@ -87,7 +90,13 @@ define([
 			grid.set("collection", setToMemory);
 		},
 		initComponents: function(data) {
-			data = this.addLinks(data);
+			data = data.filter(function(item) {
+				if (item.manifest === false) {
+					return false;
+				}
+				return true;
+			});
+			data = this.addExtras(data);
 			this.memory = new Memory({
 				data: data,
 			});
@@ -114,6 +123,7 @@ define([
 						label: "License",
 						formatter: makeLicense
 					},
+					popularity: 'Repo Popularity',
 					link: {
 						label: "Link",
 						formatter: makeLink
@@ -135,15 +145,43 @@ define([
 		},
 		getData: function(dataUrls) {
 			var dl = array.map(dataUrls, function(url) {
-				return xhr(url.manifestUrl, {
+				return this.getUrl(url.manifestUrl);
+			}.bind(this));
+			return all(dl);
+		},
+		getUrl: function(url) {
+			var deferred = new Deferred();
+			xhr(url, {
+				handleAs: 'json',
+				preventCache: true,
+				headers: {
+					"X-Requested-With": ""
+				},
+			}).then(function(res) {
+				xhr(this.getApiUrl(url), {
 					handleAs: 'json',
 					preventCache: true,
 					headers: {
 						"X-Requested-With": ""
 					},
+				}).then(function(githubApiRes) {
+					deferred.resolve({
+						manifest: res,
+						repoData: githubApiRes
+					});
+				}.bind(this), function(error) {
+					console.log('github error', error);
 				});
+			}.bind(this), function(err) {
+				console.log('Invalid URL. The user probably took this repo down: ', url);
+				deferred.resolve(false);
 			});
-			return all(dl);
+			return deferred;
+		},
+		getApiUrl: function(url) {
+			var parts = url.split("/");
+			var repoUrl = 'http://gavhost.com/githubApiCache/?url=https://api.github.com/repos/' + parts[3] + '/' + parts[4];
+			return repoUrl;
 		},
 		queryGrid: function(item, index, items) {
 			var filterString = this.filterTextBox ? this.filterTextBox.get("value") + "" : "";
@@ -164,11 +202,17 @@ define([
 			// if we haven't returned true, we should not show this.
 			return false;
 		},
-		addLinks: function(data) {
+		addExtras: function(data) {
+			console.log('addExtras', data);
 			for (var i = 0; i < data.length; i++) {
-				data[i].link = widgetLocations[i]['url'];
+				data[i].manifest.link = widgetLocations[i]['url'];
+				data[i].manifest.popularity = data[i].repoData.stargazers_count + data[i].repoData.subscribers_count;
 			}
-			return data;
+
+			var retData = data.map(function(obj) {
+				return obj.manifest;
+			});
+			return retData;
 		}
 	};
 });
